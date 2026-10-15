@@ -1,172 +1,220 @@
-# Advanced Fruit Store Agent
+# Fruit Store Assistant 🍎
 
-An educational, multi-step AI agent for managing a fruit-store inventory, preparing invoices, and adapting orders to stock and budget constraints.
+A fruit store assistant built with **Python**, **LangGraph**, and a local language model served through **Ollama**.
 
-The project uses **Ollama** with the local **`qwen2.5:3b`** model. Inventory is stored in a separate JSON file, and all price calculations are performed by a Python calculator tool.
+The assistant interprets customer requests, checks fruit availability, calculates order totals, and prepares invoice quotes. It can also revise a plan when stock or budget constraints require quantity adjustments.
 
-> **Purpose:** Demonstrate planning, tool execution, observation, evaluation, replanning, and decision-making in an AI agent.
->
-> **Scope:** A single-user classroom demonstration—not a production checkout system.
-
----
+> Orders are finalized only after the customer explicitly sends `confirm order`.
 
 ## Features
 
-- Local language model through Ollama
-- JSON-based inventory containing ten fruits
-- Product price and stock lookup
-- Explicit multi-step order plans
-- Deterministic invoice calculations using `Decimal`
-- Stock and budget validation
-- Quantity reductions when authorized by the user
-- Bounded planning attempts and model-call retries
-- Short-term conversation memory
-- User confirmation before inventory updates
-- Execution logs for classroom demonstrations
+- Understand customer requests using a local language model.
+- Manage fruit inventory with prices and available stock.
+- Normalize fruit names before processing.
+- Validate quantity and price inputs.
+- Convert quantities from pounds to kilograms when needed.
+- Check shopping baskets against available stock.
+- Calculate invoice quotes with appropriate rounding.
+- Replan orders when the customer allows quantity reductions.
+- Load and save inventory data safely.
+- Require explicit confirmation before finalizing an order.
 
----
+## Technologies
 
-## Agent Architecture
-
-The application separates model-generated proposals from application-controlled execution.
-
-```text
-User Request
-     |
-     v
-Interpret Request and Extract Constraints
-     |
-     v
-Route to the Appropriate Workflow
-     |
-     v
-Create and Validate a Plan
-     |
-     v
-Execute a Tool
-     |
-     v
-Observe the Result
-     |
-     v
-Evaluate Against Constraints
-     |
-     +--> CONTINUE
-     +--> REPLAN
-     +--> ASK_USER
-     +--> FINISH
-     +--> AWAIT_CONFIRMATION
-```
-
-For order requests, the application enforces this tool sequence:
-
-```text
-check_stock → calculate_total → prepare_invoice
-```
-
-The model proposes the basket and its quantities. Python validates the plan, executes tools, and checks the results.
-
-### Confirmation Boundary
-
-Inventory updates are handled separately from the model-driven workflow:
-
-```text
-Pending Invoice
-     |
-     v
-User types "confirm order"
-     |
-     v
-Recheck Stock and Prices
-     |
-     v
-Update fruits.json
-```
-
-The inventory-update function is **not available as an LLM tool**.
-
----
-
-## Session 3 Concepts
-
-| Concept | Implementation |
+| Technology | Purpose |
 |---|---|
-| Planner | `FruitAgent.create_plan()` |
-| Executor | Registered functions in `TOOLS` |
-| Task decomposition | Explicit plan steps |
-| Routing | Request interpretation and intent-based workflows |
-| ReAct-style feedback | Tool actions, observations, and subsequent decisions |
-| Evaluation | `FruitAgent.evaluate()` |
-| Replanning | Bounded planning loop |
-| Retry handling | Bounded Ollama request retries |
-| Continue versus finish | Explicit decision values |
-| State | Request, catalog, plan, invoice, history, and status |
-| Short-term memory | Recent conversation messages |
-| Human approval | Explicit confirmation command |
+| Python | Application logic and inventory processing |
+| LangGraph | Workflow orchestration, state management, and conditional routing |
+| Ollama | Local language model server |
+| `qwen2.5:3b` | Language model used to interpret requests |
 
-This is a **constrained planning agent**. It adapts order quantities within a fixed, validated workflow rather than choosing arbitrary tool sequences.
+## Inventory Conventions
 
-Execution logs show observable actions and results, not the model’s private internal reasoning.
+- **Currency:** USD
+- **Quantity unit:** kilograms
+- **Fruit information:** name, price per kilogram, and stock in kilograms
 
----
+Prices and stock must come from the inventory data. The assistant must not invent product prices or availability.
 
-## Project Structure
+Quantities provided in pounds are converted to kilograms before inventory validation and price calculation.
 
-```text
-fruit_store_agent/
-├── main.py
-├── agent.py
-├── tools.py
-├── calculator.py
-├── inventory.py
-├── fruits.json
-├── requirements.txt
-└── README.md
-```
+## How It Works
 
-### File Responsibilities
+The application separates language understanding from inventory and order calculations.
 
-| File | Responsibility |
+1. **Interpret the request**  
+   Identify the customer’s intent, requested fruits, quantities, and relevant constraints.
+
+2. **Create a plan**  
+   Decide which tools should run and in what order.
+
+3. **Execute a tool**  
+   Perform the current operation, such as checking stock or calculating a total.
+
+4. **Evaluate the result**  
+   Decide whether to continue, revise the plan, or finish.
+
+5. **Respond to the customer**  
+   Present the result, explain a problem, or ask for order confirmation.
+
+## LangGraph Architecture
+
+The workflow contains five LangGraph nodes:
+
+| Node | Responsibility |
 |---|---|
-| `main.py` | Command-line interface |
-| `agent.py` | Interpretation, routing, planning, evaluation, memory, and execution loop |
-| `tools.py` | Inventory lookup, stock checks, invoice tools, and confirmation handler |
-| `calculator.py` | Decimal-based invoice calculations |
-| `inventory.py` | Inventory validation, reading, and saving |
-| `fruits.json` | Product names, prices, and stock |
-| `requirements.txt` | Python dependencies |
+| `interpret_step` | Interpret the customer’s request |
+| `plan_step` | Create or revise the execution plan |
+| `act_step` | Execute the current tool |
+| `evaluate_step` | Evaluate the tool result and choose the next action |
+| `finish_step` | Prepare the final response for the current graph run |
 
----
+### Workflow Diagram
 
-## Requirements
+```mermaid
+flowchart TD
+    START([START]) --> I[interpret_step]
 
-- Python 3.10 or newer recommended
-- Ollama installed
-- The `qwen2.5:3b` model downloaded
-- Sufficient memory to run the model locally
+    I -->|PLAN| P[plan_step]
+    I -->|Needs clarification| END([END])
 
-Python dependency:
+    P -->|ACT| A[act_step]
+    P -->|Cannot proceed| F[finish_step]
 
-```text
-requests>=2.32.0,<3.0.0
+    A --> E[evaluate_step]
+
+    E -->|CONTINUE| A
+    E -->|REPLAN| P
+    E -->|Otherwise| F
+
+    F --> END
 ```
 
-Install Ollama from:
+### Nodes Are Not the Same as Tools
 
-https://ollama.com/
+The following operations are tools executed inside `act_step`:
 
----
+- `check_stock`
+- `calculate_total`
+- `prepare_invoice`
 
-## Installation
+They are **not separate LangGraph nodes**.
+
+For example, an order plan may contain:
+
+```python
+["check_stock", "calculate_total", "prepare_invoice"]
+```
+
+The graph visits `act_step` repeatedly, executing one tool on each visit.
+
+## Workflow Loops
+
+The workflow supports both continued execution and replanning.
+
+### 1. Continue to the Next Tool
+
+```text
+act_step → evaluate_step → act_step
+```
+
+When the evaluator returns `CONTINUE`, the application advances the step index and executes the next tool.
+
+A successful quote workflow follows this sequence:
+
+```text
+act_step: check_stock
+    ↓
+evaluate_step: CONTINUE
+    ↓
+act_step: calculate_total
+    ↓
+evaluate_step: CONTINUE
+    ↓
+act_step: prepare_invoice
+    ↓
+evaluate_step: AWAIT_CONFIRMATION
+    ↓
+finish_step
+```
+
+### 2. Revise the Plan
+
+```text
+plan_step → act_step → evaluate_step → plan_step
+```
+
+When the evaluator returns `REPLAN`, execution returns to the planning node.
+
+Replanning can occur when:
+
+- The requested quantity exceeds available stock.
+- The calculated total exceeds the customer’s budget.
+- The customer has allowed quantity reductions.
+
+The revised basket is checked again before the workflow proceeds.
+
+If quantity reductions are not allowed, the assistant should explain the constraint rather than silently change the order.
+
+### Conditional Routing
+
+The evaluation routing follows this pattern:
+
+```python
+def route_after_evaluate(self, state):
+    if state["decision"] == "CONTINUE":
+        return "act_step"
+
+    if state["decision"] == "REPLAN":
+        return "plan_step"
+
+    return "finish_step"
+```
+
+This routing preserves the assistant’s ability to react to tool results and revise its plan.
+
+## Order Confirmation
+
+Preparing an invoice quote does **not** finalize an order.
+
+The customer must explicitly send:
+
+```text
+confirm order
+```
+
+The confirmation requirement keeps quote preparation separate from order finalization.
+
+> Reaching `END` means the current graph run has finished. It does not necessarily mean an order has been confirmed.
+
+## Validation and Reliability
+
+The application includes validation for inventory and order processing:
+
+- Fruit names are normalized before lookup.
+- Numeric inputs are validated before calculation.
+- Requested quantities are checked against available stock.
+- Prices are read from inventory data.
+- Monetary calculations use decimal handling and appropriate rounding.
+- Inventory loading and saving include safeguards.
+
+## Getting Started
+
+### Prerequisites
+
+- Python compatible with the project’s dependencies
+- Ollama installed locally
+- The project’s Python dependencies
+- A valid inventory file in the format expected by the application
 
 ### 1. Clone the Repository
 
-```bash
-git clone https://github.com/hosseinbahrami2006/fruit_store_agent.git
-cd fruit_store_agent
-```
+Replace the placeholders with your GitHub username and repository name:
 
-This README describes the advanced implementation. Ensure the files listed above contain that implementation before running it.
+```bash
+git clone https://github.com/<your-username>/<repository-name>.git
+cd <repository-name>
+```
 
 ### 2. Create a Virtual Environment
 
@@ -174,7 +222,7 @@ This README describes the advanced implementation. Ensure the files listed above
 python -m venv .venv
 ```
 
-Activate it on Linux or macOS:
+Activate it on macOS or Linux:
 
 ```bash
 source .venv/bin/activate
@@ -183,16 +231,20 @@ source .venv/bin/activate
 Activate it on Windows PowerShell:
 
 ```powershell
-.\.venv\Scripts\Activate.ps1
+.venv\Scripts\Activate.ps1
 ```
 
 ### 3. Install Dependencies
+
+If the repository provides a `requirements.txt` file:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 4. Download the Model
+Otherwise, install dependencies using the dependency configuration included in the project.
+
+### 4. Download the Local Model
 
 ```bash
 ollama pull qwen2.5:3b
@@ -206,447 +258,83 @@ If Ollama is not already running:
 ollama serve
 ```
 
-Keep the service running while using the application.
+### 6. Configure the Application
 
-### 6. Run the Agent
+Check the application’s configuration for:
+
+- Ollama API connection settings
+- Model name: `qwen2.5:3b`
+- Inventory file location
+
+### 7. Run the Application
+
+Run the Python entry-point file included in the repository:
 
 ```bash
-python main.py
+python <entry-point-file>.py
 ```
 
----
+Replace `<entry-point-file>` with the actual application filename.
 
-## Usage
+## Example Requests
 
-Enter requests in English.
-
-### List Inventory
+### Request an Order Quote
 
 ```text
-Which fruits are available?
+I would like 2 kg of apples and 1 kg of bananas.
 ```
 
-The agent retrieves product names, prices, and available stock.
+The assistant checks stock, calculates the total, and prepares a quote using inventory prices.
 
-### Check a Product
+### Allow Quantity Adjustments
 
 ```text
-What is the price and stock of apples?
+I would like 5 kg of apples. You may reduce the quantity if there is not enough stock.
 ```
 
-### Prepare an Invoice
+The assistant can revise the basket when the requested quantity is unavailable.
+
+### Set a Budget
 
 ```text
-Prepare an invoice for 2 kg of apples and 3 kg of bananas.
+I want apples and bananas with a maximum budget of $15.
+You may reduce the quantities to stay within my budget.
 ```
 
-The agent checks stock, calculates the total, and prepares a quote.
+The assistant can replan if the calculated total exceeds the budget.
 
-**Preparing a quote does not change inventory.**
-
-### Prepare an Order With a Budget
+### Use Pounds
 
 ```text
-Prepare an order with 3 kg of apples, 2 kg of bananas,
-and 3 kg of oranges. My budget is $25.
-Reduce quantities if necessary, but keep all three fruits.
+I would like 2 pounds of apples.
 ```
 
-When quantity reductions are authorized, the agent can revise the basket after a stock or budget failure.
+The application converts the quantity to kilograms before processing.
 
-### Modify a Pending Order
+### Confirm an Order
 
 ```text
-Add one more kilogram of apples.
+confirm order
 ```
 
-The interpreter receives the pending order and recent conversation as context.
-
-Because interpretation depends on the model, always review the resulting invoice before confirming it.
-
----
-
-## Commands
-
-Commands are case-insensitive.
-
-| Command | Behavior |
-|---|---|
-| `confirm order` | Revalidate and purchase the pending order |
-| `cancel order` | Discard the pending order without changing stock |
-| `reset` | Clear conversation memory, pending order, and execution state |
-| `exit` | Close the application |
-
-Use the exact command `confirm order` to approve a purchase. A conversational response such as “yes” does not directly trigger the inventory update.
-
----
-
-## Example: Planning and Replanning
-
-Assume the inventory includes:
-
-| Fruit | Price per kg | Available stock |
-|---|---:|---:|
-| Apple | $4.00 | 10 kg |
-| Banana | $2.50 | 8 kg |
-| Orange | $3.50 | 2 kg |
-
-### User Request
-
-```text
-Prepare an order with 3 kg of apples, 2 kg of bananas,
-and 3 kg of oranges. My budget is $25.
-Reduce quantities if necessary, but keep all three fruits.
-```
-
-### Initial Basket
-
-```text
-Apples:  3 × $4.00 = $12.00
-Bananas: 2 × $2.50 =  $5.00
-Oranges: 3 × $3.50 = $10.50
-
-Total: $27.50
-```
-
-The initial request exceeds both orange stock and the budget.
-
-### Feedback Loop
-
-```text
-PLAN
-  Check stock.
-  Calculate total.
-  Prepare invoice.
-
-ACT
-  Run check_stock.
-
-OBSERVE
-  Requested oranges: 3 kg.
-  Available oranges: 2 kg.
-
-EVALUATE
-  Stock constraint failed.
-
-DECIDE
-  Replan because reductions are authorized.
-```
-
-### One Valid Revised Basket
-
-```text
-Apples:  3 × $4.00 = $12.00
-Bananas: 2 × $2.50 =  $5.00
-Oranges: 2 × $3.50 =  $7.00
-
-Total: $24.00
-```
-
-The agent then asks for confirmation.
-
-> Revised quantities may differ between runs. The model proposes them, but application code checks the required products, permitted quantities, stock, and budget.
-
----
-
-## Inventory Format
-
-`fruits.json` contains a list of products:
-
-```json
-[
-  {
-    "name": "apple",
-    "price_per_kg": "4.00",
-    "stock_kg": "10"
-  },
-  {
-    "name": "banana",
-    "price_per_kg": "2.50",
-    "stock_kg": "8"
-  }
-]
-```
-
-### Fields
-
-| Field | Description |
-|---|---|
-| `name` | Unique product name |
-| `price_per_kg` | Price for one kilogram |
-| `stock_kg` | Available quantity in kilograms |
-
-Use lowercase, singular product names.
-
-Prices and stock are represented as decimal strings. The application uses Python’s `Decimal` type to avoid binary floating-point errors in financial calculations.
-
-Invoice line totals are rounded to two decimal places using `ROUND_HALF_UP`.
-
-The sample application displays prices using `$`; it does not perform currency conversion.
-
----
-
-## Tools
-
-### Model-Workflow Tools
-
-| Tool | Purpose |
-|---|---|
-| `list_inventory` | Return all products |
-| `get_product` | Return one product’s information |
-| `check_stock` | Validate planned quantities against stock |
-| `calculate_total` | Calculate invoice lines and total |
-| `prepare_invoice` | Return the calculated invoice for review |
-
-### Application-Only Operation
-
-| Function | Purpose |
-|---|---|
-| `confirm_pending_order` | Recheck and commit an explicitly confirmed order |
-
-The confirmation function is excluded from the model’s tool registry.
-
----
-
-## Validation and Decision Rules
-
-### Plan Validation
-
-For an order, the application checks that:
-
-- The required tool sequence is preserved.
-- Every requested product appears exactly once.
-- No extra products are added.
-- No required products are removed.
-- Quantities are positive.
-- Quantities do not exceed the interpreted request.
-- Quantities remain unchanged when reductions are not authorized.
-
-### Result Evaluation
-
-| Result | Decision |
-|---|---|
-| Stock check passes | Continue |
-| Stock check fails and reductions are allowed | Replan |
-| Stock check fails without reduction permission | Ask the user |
-| Total exceeds budget and reductions are allowed | Replan |
-| Total exceeds budget without reduction permission | Ask the user |
-| Valid invoice is prepared | Await confirmation |
-| Product information is retrieved | Finish |
-| Planning attempt limit is reached | Stop with an incomplete result |
-
-If a required fruit has zero stock, retaining it with a positive quantity is impossible. The agent may exhaust its planning attempts and ask for a revised request.
-
----
-
-## State and Memory
-
-During execution, the agent tracks:
-
-```text
-request
-catalog
-plan
-invoice
-history
-status
-```
-
-The agent also keeps:
-
-- Recent conversation messages
-- A pending order
-- The latest execution state
-
-Memory is stored **only in the running Python process**.
-
-Restarting the application clears conversation memory and pending orders. The JSON inventory remains on disk.
-
----
-
-## Configuration
-
-The following settings are defined in `agent.py`:
-
-```python
-MODEL = "qwen2.5:3b"
-OLLAMA_URL = "http://localhost:11434/api/chat"
-
-MAX_MODEL_RETRIES = 2
-MAX_PLAN_ATTEMPTS = 4
-MEMORY_MESSAGES = 12
-```
-
-| Setting | Purpose |
-|---|---|
-| `MODEL` | Ollama model name |
-| `OLLAMA_URL` | Local Ollama API endpoint |
-| `MAX_MODEL_RETRIES` | Maximum attempts for each model request |
-| `MAX_PLAN_ATTEMPTS` | Maximum planning attempts per interpreted request |
-| `MEMORY_MESSAGES` | Maximum retained conversation messages |
-
-Despite its name, `MAX_MODEL_RETRIES` is used as the total number of request attempts in the current implementation.
-
-Enable classroom execution logs:
-
-```python
-agent = FruitAgent(verbose=True)
-```
-
-Disable them:
-
-```python
-agent = FruitAgent(verbose=False)
-```
-
----
-
-## Error Handling
-
-The application distinguishes execution problems from constraint failures.
-
-### Model Request Errors
-
-Network errors, invalid JSON responses, and malformed API responses trigger bounded model-request retries.
-
-### Invalid Plans
-
-Plans with invalid tools, products, or quantities are rejected. Validation feedback is supplied to the next planning attempt.
-
-### Business Constraint Failures
-
-Insufficient stock or an over-budget invoice leads to replanning or a request for user clarification.
-
-### Changed Inventory or Prices
-
-Before confirming an order, the application reads inventory again.
-
-If stock is insufficient or the invoice has changed, the quote is rejected and the user must request a new one.
-
-Inventory read and write failures are reported to the user; they do not use the model-request retry mechanism.
-
----
-
-## Manual Test Scenarios
-
-These are suggested manual checks, not an automated test suite.
-
-| Scenario | Expected Behavior |
-|---|---|
-| Request all available fruits | Display inventory |
-| Request one product’s price | Display product information |
-| Order within stock and budget | Prepare quote |
-| Order beyond stock without modification permission | Ask for revision |
-| Allow reductions when stock is insufficient | Attempt replanning |
-| Allow reductions when over budget | Attempt replanning |
-| Require a fruit with zero stock | Stop or request revised constraints |
-| Confirm a valid quote | Update inventory |
-| Cancel a quote | Leave inventory unchanged |
-| Change prices before confirmation | Reject stale quote |
-| Confirm the same order twice | Second confirmation finds no pending order |
-| Stop Ollama before a request | Report failure after bounded attempts |
-
-Back up `fruits.json` before testing purchases, because confirmed orders permanently reduce the stored stock.
-
----
-
-## Troubleshooting
-
-### Cannot Connect to Ollama
-
-Ensure Ollama is running:
-
-```bash
-ollama serve
-```
-
-Verify available models:
-
-```bash
-ollama list
-```
-
-### Model Not Found
-
-Download the configured model:
-
-```bash
-ollama pull qwen2.5:3b
-```
-
-### Slow Responses
-
-Local inference speed depends on hardware.
-
-Possible options:
-
-- Use hardware acceleration supported by Ollama.
-- Close memory-intensive applications.
-- Increase the HTTP timeout in `agent.py` if appropriate.
-
-### Invalid Plans or Repeated Planning Failures
-
-Small models can produce invalid structures or misunderstand requests.
-
-Try:
-
-- Explicit quantities
-- Clear budget limits
-- Explicit permission to reduce quantities
-- A simpler request
-- A more capable local model
-
-Increasing planning attempts may help, but it does not guarantee success.
-
-### Invalid Inventory File
-
-Check that:
-
-- The file contains valid JSON.
-- The top-level value is a list.
-- Product names are unique.
-- Prices and stock are finite, nonnegative decimal values.
-- Each product includes all required fields.
-
----
-
-## Limitations
-
-- Designed for one running application instance and one user.
-- No database transactions or multi-user concurrency control.
-- Atomic file replacement prevents partially written JSON, but not concurrent lost updates.
-- Conversation memory and pending orders are not persisted.
-- Request interpretation depends on the model and may misread user constraints.
-- Validation enforces the interpreted request; it cannot guarantee that interpretation matches the user’s original intent.
-- There is no optimal basket solver. The planner may fail to find a valid basket even when one exists.
-- Initial requested quantities are encouraged through prompting, rather than separately enforced on the first planning attempt.
-- No product substitutions, authentication, payment processing, taxes, or delivery calculations.
-- No inventory reservation while a quote awaits confirmation.
-- No durable order ledger or idempotency key for recovery from uncertain write outcomes.
-- No automated test suite is included in this implementation.
-
-For production use, add transactional storage, structured confirmation, durable order records, concurrency controls, and automated tests.
-
----
-
-## Suggested Future Improvements
-
-- Add typed request and plan schemas.
-- Ask the user to approve extracted constraints.
-- Use a deterministic quantity-adjustment or optimization tool.
-- Add explicit tool-call and overall execution time limits.
-- Implement automated tests with mocked model responses.
-- Persist conversation state and pending orders.
-- Add SQLite or another transactional database.
-- Add order IDs and idempotent confirmation.
-- Improve handling of impossible constraints.
-- Add a web interface.
-- Add structured audit logs.
-
----
-
-## Learning Takeaway
-
-> A plan is a proposal, a tool result is an observation, and evaluation determines the next action.
-
-This project demonstrates how a simple tool-using assistant can become a more capable agent by connecting those elements in a bounded feedback loop.
+## Notes for Beginner Students
+
+This project demonstrates several important concepts:
+
+- **State:** Information passed between workflow nodes.
+- **Node:** A function responsible for one stage of the workflow.
+- **Tool:** A specific operation executed by the action node.
+- **Conditional edge:** A connection selected according to the current state.
+- **Loop:** A route that returns execution to a previously visited node.
+- **Replanning:** Revising a plan after evaluating a result.
+
+The key idea is that the workflow is not just a fixed sequence. It can continue executing tools or return to planning when new information requires an adjustment.
+
+## Project Rules
+
+1. Respond in English.
+2. Use inventory data for prices and stock.
+3. Validate quantities before processing an order.
+4. Respect stock and budget constraints.
+5. Reduce quantities only when the customer allows it.
+6. Require the explicit `confirm order` command before finalizing an order.

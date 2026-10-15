@@ -9,9 +9,13 @@ from langgraph.graph import END, START, StateGraph
 from inventory import decimal_value, find_product_name, read_inventory
 from tools import (
     TOOLS,
+    TOOL_SCHEMAS,
     PlanningConstraintError,
     adjust_order_items,
     confirm_pending_order,
+    parse_tool_call_text,
+    tool_call_to_request,
+    validate_tool_arguments,
 )
 
 
@@ -29,41 +33,41 @@ STEPS_BY_INTENT = {
 }
 
 
+# SYSTEM_PROMPT
+# Tells the model to choose exactly one tool from TOOL_SCHEMAS.
+# The tool schemas themselves are sent to Ollama with bind_tools.
 SYSTEM_PROMPT = """
-You interpret messages for a fruit shop.
-Return only one JSON object.
+You are the decision maker of a fruit shop agent.
+You receive one JSON object with: message, catalog, conversation, pending_order.
+Your only job is to call exactly ONE tool. Never answer with plain text.
 
-Choose one intent:
-- inventory: the user wants the product list, prices, or stock
-- product: the user asks about one product
-- order: the user wants a new or changed invoice
-- clarify: the message is unclear or not supported
+Choose the tool:
+- list_inventory: the user wants the product list, prices, or stock
+- get_product: the user asks about one product
+- quote_order: the user wants a new or changed invoice
+- ask_clarification: the message is unclear or not supported
 
-JSON structure:
-{
-  "intent": "order",
-  "product": null,
-  "items": [{"name": "apple", "quantity_kg": "3"}],
-  "budget": null,
-  "allow_reduction": false,
-  "question": null
-}
-
-Rules:
+Rules for quote_order:
 - Quantities and budget are decimal strings. Quantities are in kg.
 - If the user gives pounds, convert to kg (1 lb = 0.45359237 kg).
-- For orders, write the complete basket.
+- Always send the complete basket in one call.
 - For changes, use pending_order and conversation as context.
 - Keep an earlier budget unless the user changes or removes it.
 - Never calculate totals and never reduce quantities yourself.
 - A low budget alone is NOT permission to reduce quantities.
 - allow_reduction is true only if the user clearly allows smaller quantities.
 - Never invent quantities. Never remove or replace fruits.
-- If the budget currency is different from the catalog currency, choose clarify.
-- If important details are missing, choose clarify and write a question.
-- Always write questions in English.
-"""
 
+Rules for ask_clarification:
+- Use it if the budget currency is different from the catalog currency.
+- Use it if important details are missing.
+- Always write questions in English.
+
+Example: "I need 3 kg of apples. My budget is 5 USD. Reduce if needed."
+-> quote_order with
+   {"items": [{"name": "apple", "quantity_kg": "3"}],
+    "budget": "5", "allow_reduction": true}
+"""
 
 # AgentState
 # All data that moves between the graph nodes.
@@ -140,6 +144,9 @@ class FruitAgent:
 
     # __init__
     # Creates the LangChain model and builds the LangGraph graph once.
+    # The model is connected to TOOL_SCHEMAS with bind_tools,
+    # so it answers with a tool call instead of free JSON text.
+    # Note: format="json" is not used, because it blocks tool calls.
     def __init__(self, verbose=True):
         self.verbose = verbose
         self.memory = []
@@ -148,8 +155,7 @@ class FruitAgent:
         self.model = ChatOllama(
             model=MODEL,
             temperature=0,
-            format="json",
-        )
+        ).bind_tools(TOOL_SCHEMAS)
 
         self.graph = self.build_graph()
 
@@ -169,19 +175,55 @@ class FruitAgent:
         self.memory.append({"role": "assistant", "content": answer})
         self.memory = self.memory[-MEMORY_MESSAGES:]
 
+    # read_tool_call
+    # Reads the tool call from the model response.
+    # 1. A real tool call (response.tool_calls) is used first.
+    # 2. If the model wrote the tool call as text, that text is parsed.
+    # The model must call exactly one tool.
+    def read_tool_call(self, response):
+        tool_calls = getattr(response, "tool_calls", None) or []
+
+        if len(tool_calls) > 1:
+            raise ValueError(
+                "Call exactly one tool. "
+                "Put the complete basket in one quote_order call."
+            )
+
+        if tool_calls:
+            return tool_calls[0]["name"], tool_calls[0].get("args", {})
+
+        return parse_tool_call_text(response.content)
+
     # ask_model
     # Sends the system prompt and data to the model with LangChain.
-    # It tries again if the model fails or returns broken JSON.
+    # The model chooses one tool from TOOL_SCHEMAS.
+    # The tool call is checked against its schema and turned into
+    # the same request dictionary that check_request expects.
+    # It tries again if the model fails or sends an invalid tool call.
+    # On a retry, the model is told what was wrong with its last answer.
     def ask_model(self, payload):
         last_error = None
 
         for attempt in range(MAX_MODEL_RETRIES):
             try:
-                response = self.model.invoke([
+                messages = [
                     SystemMessage(content=SYSTEM_PROMPT),
                     HumanMessage(content=json.dumps(payload)),
-                ])
-                return json.loads(response.content)
+                ]
+
+                if last_error is not None:
+                    messages.append(HumanMessage(content=(
+                        f"Your previous answer was rejected: {last_error} "
+                        "Call exactly one tool with valid arguments."
+                    )))
+
+                response = self.model.invoke(messages)
+
+                name, arguments = self.read_tool_call(response)
+                arguments = validate_tool_arguments(name, arguments)
+                self.log("TOOL CALL", {"tool": name, "arguments": arguments})
+
+                return tool_call_to_request(name, arguments)
 
             except Exception as error:
                 last_error = error
@@ -273,7 +315,7 @@ class FruitAgent:
     # ---------------- Graph nodes ----------------
 
     # interpret_node
-    # Node 1: reads the inventory and asks the model what the user wants.
+    # Node 1: reads the inventory and asks the model which tool to call.
     # If the request is unclear, it writes a question and the graph stops.
     def interpret_node(self, state):
         inventory = read_inventory()

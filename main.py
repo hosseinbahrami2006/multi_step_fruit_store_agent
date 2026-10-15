@@ -1,11 +1,15 @@
 from agent import FruitAgent
 
 
-def main():
-    agent = FruitAgent(verbose=True)
+# Words that close the program.
+EXIT_WORDS = {"exit", "quit"}
 
-    print("Advanced Fruit Store Agent")
-    print("Powered by local Ollama and qwen2.5:3b")
+
+# print_welcome
+# Shows the program name, the commands, and an example message.
+def print_welcome():
+    print("Fruit Store Agent")
+    print("Powered by LangChain, LangGraph, and local Ollama (qwen2.5:3b)")
     print()
     print("Commands:")
     print("- confirm order")
@@ -15,11 +19,21 @@ def main():
     print()
     print("Example:")
     print(
-        "Prepare an order with 3 kg of apples, "
-        "2 kg of bananas, and 3 kg of oranges. "
-        "My budget is $25. Reduce quantities if necessary, "
-        "but keep all three fruits."
+        "I need 3 kg of apples and 2 kg of bananas. "
+        "My budget is 5 USD. Reduce quantities if necessary."
     )
+
+
+# main
+# Starts the agent and runs the chat loop.
+# 1. Read a message from the user.
+# 2. Skip empty messages.
+# 3. Stop on "exit" or "quit" (any letter case, extra spaces allowed).
+# 4. Send every other message to the agent and print the answer.
+# Ctrl+C or Ctrl+D also closes the program safely.
+def main():
+    agent = FruitAgent(verbose=True)
+    print_welcome()
 
     while True:
         try:
@@ -31,7 +45,7 @@ def main():
         if not message:
             continue
 
-        if message.lower() == "exit":
+        if message.casefold() in EXIT_WORDS:
             print("Goodbye.")
             break
 
@@ -39,5 +53,7 @@ def main():
         print(f"\nAgent:\n{answer}")
 
 
+# Run main() only when this file is started directly:
+#   python main.py
 if __name__ == "__main__":
     main()

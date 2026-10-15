@@ -1,44 +1,56 @@
-	
-currency	"USD"
-quantity_unit	"kg"
-products	
-0	
-name	"apple"
-price_per_kg	"4.00"
-stock_kg	"68.98"
-1	
-name	"banana"
-price_per_kg	"2.50"
-stock_kg	"76.60"
-2	
-name	"orange"
-price_per_kg	"3.50"
-stock_kg	"21"
-3	
-name	"grape"
-price_per_kg	"6.00"
-stock_kg	"5"
-4	
-name	"pear"
-price_per_kg	"4.50"
-stock_kg	"6"
-5	
-name	"peach"
-price_per_kg	"5.00"
-stock_kg	"4"
-6	
-name	"kiwi"
-price_per_kg	"7.00"
-stock_kg	"3"
-7	
-name	"mango"
-price_per_kg	"8.00"
-stock_kg	"4"
-8	
-name	"pineapple"
-price_per_kg	"5.50"
-stock_kg	"5"
-9	
-name	"strawberry"
-price_per_kg	"9.00"
-stock_kg	"3"
+{
+  "currency": "USD",
+  "quantity_unit": "kg",
+  "products": [
+    {
+      "name": "apple",
+      "price_per_kg": "4.00",
+      "stock_kg": "68.98"
+    },
+    {
+      "name": "banana",
+      "price_per_kg": "2.50",
+      "stock_kg": "76.60"
+    },
+    {
+      "name": "orange",
+      "price_per_kg": "3.50",
+      "stock_kg": "21"
+    },
+    {
+      "name": "grape",
+      "price_per_kg": "6.00",
+      "stock_kg": "5"
+    },
+    {
+      "name": "pear",
+      "price_per_kg": "4.50",
+      "stock_kg": "6"
+    },
+    {
+      "name": "peach",
+      "price_per_kg": "5.00",
+      "stock_kg": "4"
+    },
+    {
+      "name": "kiwi",
+      "price_per_kg": "7.00",
+      "stock_kg": "3"
+    },
+    {
+      "name": "mango",
+      "price_per_kg": "8.00",
+      "stock_kg": "4"
+    },
+    {
+      "name": "pineapple",
+      "price_per_kg": "5.50",
+      "stock_kg": "5"
+    },
+    {
+      "name": "strawberry",
+      "price_per_kg": "9.00",
+      "stock_kg": "3"
+    }
+  ]
+}

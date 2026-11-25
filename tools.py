@@ -5,19 +5,16 @@ from calculator import calculate_invoice
 from inventory import decimal_value, read_inventory, save_inventory
 
 
-# Reduced quantities change in steps of 0.01 kg.
+# Reduced quantities use 0.01 kg steps.
 QUANTITY_STEP = Decimal("0.01")
 
 
-# PlanningConstraintError
-# A special error for orders that cannot be fixed,
-# for example when the budget is too small for even 0.01 kg of each fruit.
+# Error for orders that cannot be adjusted.
 class PlanningConstraintError(ValueError):
     pass
 
 
-# list_inventory
-# Tool: returns all products with prices and stock.
+# Return all products and their stock.
 def list_inventory(state):
     return {
         "ok": True,
@@ -25,9 +22,7 @@ def list_inventory(state):
     }
 
 
-# get_product
-# Tool: returns one product.
-# The name was already matched to the catalog in check_request.
+# Return one product.
 def get_product(state):
     name = state["request"]["product"]
 
@@ -38,10 +33,7 @@ def get_product(state):
     return {"ok": False, "reason": f"Unknown product: {name}."}
 
 
-# find_stock_problems
-# Helper: compares each basket item with the stock.
-# It returns a list of problems. An empty list means everything is fine.
-# Both check_stock and confirm_pending_order use this helper.
+# Find basket items that exceed available stock.
 def find_stock_problems(items, products):
     stock = {
         product["name"]: decimal_value(product["stock_kg"])
@@ -65,8 +57,7 @@ def find_stock_problems(items, products):
     return problems
 
 
-# check_stock
-# Tool: checks that the store has enough of every fruit in the plan.
+# Check that the planned basket is in stock.
 def check_stock(state):
     problems = find_stock_problems(
         state["plan"]["items"],
@@ -79,8 +70,7 @@ def check_stock(state):
     return {"ok": True, "reason": "Stock check passed."}
 
 
-# calculate_total
-# Tool: calculates the invoice for the planned basket.
+# Calculate the invoice for the planned basket.
 def calculate_total(state):
     inventory = state["inventory"]
 
@@ -93,8 +83,7 @@ def calculate_total(state):
     return {"ok": True, "invoice": invoice}
 
 
-# prepare_invoice
-# Tool: makes sure an invoice exists before it is shown to the user.
+# Ensure an invoice has been calculated.
 def prepare_invoice(state):
     if state.get("invoice") is None:
         return {"ok": False, "reason": "The invoice must be calculated first."}
@@ -102,21 +91,14 @@ def prepare_invoice(state):
     return {"ok": True, "invoice": state["invoice"]}
 
 
-# adjust_order_items
-# Replanning helper: makes the basket smaller so it fits the stock and budget.
-# Rules:
-#   1. Every requested fruit stays in the basket (at least 0.01 kg).
-#   2. No fruit gets more than requested or more than the stock.
-#   3. All fruits shrink together, so the basket keeps its shape.
-#   4. A binary search finds the largest basket that fits the budget.
-#   5. Every total is checked with the real calculator.
+# Reduce the basket to fit stock and budget constraints.
 def adjust_order_items(items, products, budget):
     stock = {
         product["name"]: decimal_value(product["stock_kg"])
         for product in products
     }
 
-    # Find the largest allowed amount of each fruit, counted in 0.01 kg units.
+    # Find each item's maximum quantity in step units.
     limits = []
 
     for item in items:
@@ -133,10 +115,7 @@ def adjust_order_items(items, products, budget):
 
     top_level = max(units for _, units in limits)
 
-    # basket_at
-    # Builds a basket for a level between 0 and top_level.
-    # Level 0 gives 0.01 kg of each fruit.
-    # Level top_level gives the largest allowed amount of each fruit.
+    # Build a basket for a given reduction level.
     def basket_at(level):
         basket = []
 
@@ -149,8 +128,7 @@ def adjust_order_items(items, products, budget):
 
         return basket
 
-    # total_of
-    # Returns the real invoice total of a basket.
+    # Calculate a basket's invoice total.
     def total_of(basket):
         invoice = calculate_invoice(basket, products, "")
         return decimal_value(invoice["total"])
@@ -175,7 +153,7 @@ def adjust_order_items(items, products, budget):
             "Please increase the budget or choose fewer fruits."
         )
 
-    # Binary search for the largest basket inside the budget.
+    # Find the largest basket within budget.
     low = 0
     high = top_level
     best = smallest_basket
@@ -193,7 +171,7 @@ def adjust_order_items(items, products, budget):
     return best
 
 
-# The tools the agent is allowed to run.
+# Tools available to the agent.
 TOOLS = {
     "list_inventory": list_inventory,
     "get_product": get_product,
@@ -203,11 +181,7 @@ TOOLS = {
 }
 
 
-# confirm_pending_order
-# Runs only after the user types "confirm order".
-# The model can never call this function.
-# It reads the newest inventory and checks the stock, prices, currency,
-# and budget again. Only then does it reduce the stock and save the file.
+# Revalidate and complete an order after confirmation.
 def confirm_pending_order(pending):
     inventory = read_inventory()
     products = inventory["products"]
@@ -259,25 +233,7 @@ def confirm_pending_order(pending):
     }
 
 
-# ============================================================
-# TOOL SCHEMAS
-# ------------------------------------------------------------
-# The language model reads these schemas and decides which tool
-# to call and which arguments to send.
-#
-# Safety rules:
-# - The model only CHOOSES a tool and fills its arguments.
-# - The model never calculates prices, totals, or stock.
-# - There is no schema for confirm_pending_order, so the model
-#   can never confirm an order. Only "confirm order" can do that.
-# - There is no schema for adjust_order_items, so the model can
-#   never reduce quantities. Replanning is done by Python code only.
-# ============================================================
-
-
-# TOOL_SCHEMAS
-# The tools the model can choose from, in the Ollama / OpenAI
-# "function calling" format.
+# Tool schemas constrain the model's choices and arguments.
 TOOL_SCHEMAS = [
     {
         "type": "function",
@@ -395,9 +351,7 @@ TOOL_SCHEMAS = [
 ]
 
 
-# TOOL_INTENTS
-# Connects each model tool to an intent that agent.py already understands.
-# agent.py then runs the existing steps from STEPS_BY_INTENT.
+# Map model tools to workflow intents.
 TOOL_INTENTS = {
     "list_inventory": "inventory",
     "get_product": "product",
@@ -406,17 +360,14 @@ TOOL_INTENTS = {
 }
 
 
-# SCHEMAS_BY_NAME
-# A quick lookup: tool name -> tool schema.
+# Look up tool schemas by name.
 SCHEMAS_BY_NAME = {
     schema["function"]["name"]: schema
     for schema in TOOL_SCHEMAS
 }
 
 
-# load_json_text
-# Small models sometimes send a list or an object as a JSON string.
-# This helper turns that string back into real data.
+# Decode JSON text or report an argument error.
 def load_json_text(text, path):
     try:
         return json.loads(text)
@@ -424,13 +375,7 @@ def load_json_text(text, path):
         raise ValueError(f"{path} must be valid JSON data.")
 
 
-# coerce_value
-# Checks one value against its schema and fixes small, safe mistakes:
-# - a number where a string is expected becomes a string (3 -> "3")
-# - "true" / "false" text becomes a real boolean
-# - a JSON string where a list or object is expected is decoded
-# - a single object where a list is expected becomes a list
-# Anything else that does not match raises a ValueError.
+# Coerce a value to its schema type.
 def coerce_value(value, schema, path):
     expected = schema.get("type")
 
@@ -472,11 +417,7 @@ def coerce_value(value, schema, path):
     return value
 
 
-# coerce_object
-# Checks an object against its schema:
-# - every required key must exist and must not be null
-# - every known key is checked with coerce_value
-# - unknown keys are dropped
+# Validate required fields and coerce known properties.
 def coerce_object(value, schema, path):
     properties = schema.get("properties", {})
 
@@ -493,10 +434,7 @@ def coerce_object(value, schema, path):
     return cleaned
 
 
-# validate_tool_arguments
-# Checks the tool name and the arguments that the model sent.
-# Returns clean arguments, or raises a ValueError that is sent back
-# to the model so it can try again.
+# Validate and normalize tool arguments.
 def validate_tool_arguments(name, arguments):
     schema = SCHEMAS_BY_NAME.get(name)
 
@@ -516,11 +454,7 @@ def validate_tool_arguments(name, arguments):
     return coerce_object(arguments, schema["function"]["parameters"], name)
 
 
-# parse_tool_call_text
-# Backup plan: small models sometimes write the tool call as text
-# instead of a real tool call, for example:
-#   <tool_call>{"name": "list_inventory", "arguments": {}}</tool_call>
-# This helper reads that text and returns (name, arguments).
+# Parse a tool call written as text.
 def parse_tool_call_text(text):
     if not isinstance(text, str) or not text.strip():
         raise ValueError("The model did not call a tool.")
@@ -542,10 +476,7 @@ def parse_tool_call_text(text):
     return data["name"], arguments
 
 
-# tool_call_to_request
-# Turns a checked tool call into the same request dictionary that
-# check_request in agent.py already expects.
-# Because of this, planning, tools, and replanning work exactly as before.
+# Convert a tool call to the workflow request format.
 def tool_call_to_request(name, arguments):
     return {
         "intent": TOOL_INTENTS[name],

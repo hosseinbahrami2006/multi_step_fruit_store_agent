@@ -5,14 +5,11 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 
-# The inventory file is stored next to this Python file.
+# Store inventory beside this file.
 INVENTORY_FILE = Path(__file__).resolve().parent / "fruits.json"
 
 
-# decimal_value
-# Turns a value such as "2.50" or 3 into an exact Decimal number.
-# It rejects empty values, True/False, words, and infinity.
-# We use Decimal because normal floats make small money mistakes.
+# Convert a value to a finite Decimal.
 def decimal_value(value):
     if value is None or isinstance(value, bool):
         raise ValueError("A valid number is required.")
@@ -28,10 +25,7 @@ def decimal_value(value):
     return number
 
 
-# normalize_name
-# Cleans a name so two spellings can be compared.
-# It removes extra spaces and ignores upper and lower case.
-# Example: "  Green   Apple " becomes "green apple".
+# Normalize a name for comparison.
 def normalize_name(name):
     if not isinstance(name, str):
         return ""
@@ -39,13 +33,7 @@ def normalize_name(name):
     return " ".join(name.split()).casefold()
 
 
-# find_product_name
-# Finds the real catalog name for a name written by the user or model.
-# It also understands simple plural forms:
-#   "apples" -> "apple"
-#   "peaches" -> "peach"
-#   "strawberries" -> "strawberry"
-# It returns None when the fruit is not in the catalog.
+# Match a product name, including simple plural forms.
 def find_product_name(name, products):
     wanted = normalize_name(name)
 
@@ -72,10 +60,7 @@ def find_product_name(name, products):
     return None
 
 
-# validate_inventory
-# Checks that the inventory data is safe to use.
-# It checks the currency, the unit, unique names,
-# positive prices, and stock that is not negative.
+# Validate inventory fields and values.
 def validate_inventory(data):
     if not isinstance(data, dict):
         raise ValueError("The inventory must be a JSON object.")
@@ -113,8 +98,7 @@ def validate_inventory(data):
             raise ValueError(f"The stock of {name} cannot be negative.")
 
 
-# read_inventory
-# Opens fruits.json, checks it, and returns the data.
+# Read and validate the inventory file.
 def read_inventory():
     with INVENTORY_FILE.open("r", encoding="utf-8") as file:
         data = json.load(file)
@@ -123,10 +107,7 @@ def read_inventory():
     return data
 
 
-# save_inventory
-# Saves the inventory safely.
-# It first writes a temporary file and then replaces the real file.
-# If the program crashes while writing, the real file is not broken.
+# Save inventory through a temporary file.
 def save_inventory(data):
     validate_inventory(data)
 

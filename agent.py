@@ -33,9 +33,7 @@ STEPS_BY_INTENT = {
 }
 
 
-# SYSTEM_PROMPT
-# Tells the model to choose exactly one tool from TOOL_SCHEMAS.
-# The tool schemas themselves are sent to Ollama with bind_tools.
+# The model must choose exactly one tool.
 SYSTEM_PROMPT = """
 You are the decision maker of a fruit shop agent.
 You receive one JSON object with: message, catalog, conversation, pending_order.
@@ -69,10 +67,9 @@ Example: "I need 3 kg of apples. My budget is 5 USD. Reduce if needed."
     "budget": "5", "allow_reduction": true}
 """
 
-# AgentState
-# All data that moves between the graph nodes.
-# Each node reads some fields and returns only the fields it changes.
-# Important: state keys must NOT have the same name as a graph node.
+
+# State passed between graph nodes.
+# State keys must differ from graph node names.
 class AgentState(TypedDict, total=False):
     message: str
     memory: list
@@ -91,9 +88,7 @@ class AgentState(TypedDict, total=False):
     new_pending: Optional[dict]
 
 
-# quantities_changed
-# Compares the planned basket with the requested basket as numbers.
-# "3" and "3.00" count as the same amount.
+# Compare requested and planned quantities numerically.
 def quantities_changed(planned_items, requested_items):
     requested = {
         item["name"]: decimal_value(item["quantity_kg"])
@@ -107,8 +102,7 @@ def quantities_changed(planned_items, requested_items):
     return False
 
 
-# format_invoice
-# Turns an invoice into readable text for the user.
+# Format an invoice for display.
 def format_invoice(invoice, title, note=None):
     currency = invoice["currency"]
     lines = [title]
@@ -127,8 +121,7 @@ def format_invoice(invoice, title, note=None):
     return "\n".join(lines)
 
 
-# format_products
-# Turns a list of products into readable text for the user.
+# Format products for display.
 def format_products(products, currency):
     return "\n".join(
         f"- {product['name']}: {product['price_per_kg']} {currency}/kg, "
@@ -137,16 +130,10 @@ def format_products(products, currency):
     )
 
 
-# FruitAgent
-# Keeps the conversation memory and the pending order,
-# and runs the LangGraph workflow for every normal message.
+# Manages conversation state and the workflow.
 class FruitAgent:
 
-    # __init__
-    # Creates the LangChain model and builds the LangGraph graph once.
-    # The model is connected to TOOL_SCHEMAS with bind_tools,
-    # so it answers with a tool call instead of free JSON text.
-    # Note: format="json" is not used, because it blocks tool calls.
+    # Initialize the model and graph.
     def __init__(self, verbose=True):
         self.verbose = verbose
         self.memory = []
@@ -159,27 +146,20 @@ class FruitAgent:
 
         self.graph = self.build_graph()
 
-    # log
-    # Prints one step of the agent when verbose mode is on.
+    # Print a log entry when verbose mode is enabled.
     def log(self, label, value):
         if self.verbose:
             if not isinstance(value, str):
                 value = json.dumps(value, indent=2)
             print(f"\n[{label}]\n{value}")
 
-    # remember
-    # Saves the last user message and answer.
-    # Only the newest MEMORY_MESSAGES messages are kept.
+    # Save the latest user message and answer.
     def remember(self, user_message, answer):
         self.memory.append({"role": "user", "content": user_message})
         self.memory.append({"role": "assistant", "content": answer})
         self.memory = self.memory[-MEMORY_MESSAGES:]
 
-    # read_tool_call
-    # Reads the tool call from the model response.
-    # 1. A real tool call (response.tool_calls) is used first.
-    # 2. If the model wrote the tool call as text, that text is parsed.
-    # The model must call exactly one tool.
+    # Read exactly one tool call from the model response.
     def read_tool_call(self, response):
         tool_calls = getattr(response, "tool_calls", None) or []
 
@@ -194,13 +174,7 @@ class FruitAgent:
 
         return parse_tool_call_text(response.content)
 
-    # ask_model
-    # Sends the system prompt and data to the model with LangChain.
-    # The model chooses one tool from TOOL_SCHEMAS.
-    # The tool call is checked against its schema and turned into
-    # the same request dictionary that check_request expects.
-    # It tries again if the model fails or sends an invalid tool call.
-    # On a retry, the model is told what was wrong with its last answer.
+    # Ask the model for a validated tool call, retrying on errors.
     def ask_model(self, payload):
         last_error = None
 
@@ -231,12 +205,7 @@ class FruitAgent:
 
         raise RuntimeError(f"The model failed: {last_error}")
 
-    # check_request
-    # Checks the model answer and cleans it.
-    # - Fruit names are matched to the catalog right away.
-    # - An unknown fruit becomes a friendly question.
-    # - Duplicate fruits are added together.
-    # - Numbers are checked with Decimal.
+    # Validate and normalize the model's request.
     def check_request(self, request, products):
         if not isinstance(request, dict):
             raise ValueError("The model answer must be a JSON object.")
@@ -291,7 +260,6 @@ class FruitAgent:
             if quantity <= 0:
                 raise ValueError("Quantities must be positive.")
 
-            # Duplicate fruits are added together.
             basket[name] = basket.get(name, Decimal("0")) + quantity
 
         budget = request.get("budget")
@@ -314,9 +282,7 @@ class FruitAgent:
 
     # ---------------- Graph nodes ----------------
 
-    # interpret_node
-    # Node 1: reads the inventory and asks the model which tool to call.
-    # If the request is unclear, it writes a question and the graph stops.
+    # Load inventory and interpret the request.
     def interpret_node(self, state):
         inventory = read_inventory()
 
@@ -346,11 +312,7 @@ class FruitAgent:
             "history": [],
         }
 
-    # plan_node
-    # Node 2: creates a plan (which items and which tools).
-    # First attempt: the original quantities.
-    # Later attempts (REPLAN): smaller quantities from adjust_order_items,
-    # but only if the user allowed reductions.
+    # Create or revise a plan.
     def plan_node(self, state):
         attempts = state["attempts"] + 1
         request = state["request"]
@@ -396,9 +358,7 @@ class FruitAgent:
             "decision": "ACT",
         }
 
-    # act_node
-    # Node 3 (ACT + OBSERVE): runs the current tool and saves its result.
-    # A tool error becomes a failed result instead of a crash.
+    # Run the current tool and save its result.
     def act_node(self, state):
         step = state["plan"]["steps"][state["step_index"]]
         self.log("ACT", step)
@@ -417,13 +377,7 @@ class FruitAgent:
 
         return update
 
-    # evaluate_node
-    # Node 4 (EVALUATE): looks at the tool result and chooses the next move:
-    #   CONTINUE            -> run the next tool
-    #   REPLAN              -> go back to plan_step with smaller quantities
-    #   ASK_USER            -> stop and explain the problem
-    #   FINISH              -> information is ready
-    #   AWAIT_CONFIRMATION  -> the quote is ready
+    # Evaluate the tool result and choose the next action.
     def evaluate_node(self, state):
         step = state["plan"]["steps"][state["step_index"]]
         result = state["result"]
@@ -466,9 +420,7 @@ class FruitAgent:
             "history": state["history"] + [evaluation],
         }
 
-    # finish_node
-    # Node 5: writes the final answer for the user.
-    # A new pending order is created only when a quote succeeds.
+    # Format the final answer and any pending quote.
     def finish_node(self, state):
         decision = state["decision"]
         currency = state["inventory"]["currency"]
@@ -501,7 +453,6 @@ class FruitAgent:
                 },
             }
 
-        # ASK_USER or FAILED: the old pending order is kept.
         answer = state["reason"] + "\nNo new quote was prepared."
 
         if state["request"]["intent"] == "order":
@@ -514,19 +465,15 @@ class FruitAgent:
 
     # ---------------- Graph routes ----------------
 
-    # route_after_interpret
-    # Stops the graph for clarify questions, otherwise goes to planning.
+    # Route clarification requests to the end.
     def route_after_interpret(self, state):
         return "plan_step" if state["decision"] == "PLAN" else END
 
-    # route_after_plan
-    # Goes to the tools if the plan is valid, otherwise to the final answer.
+    # Route valid plans to the tools.
     def route_after_plan(self, state):
         return "act_step" if state["decision"] == "ACT" else "finish_step"
 
-    # route_after_evaluate
-    # This is the ReAct / Replan loop:
-    # CONTINUE goes back to act_step, REPLAN goes back to plan_step.
+    # Route evaluation results to the next workflow step.
     def route_after_evaluate(self, state):
         if state["decision"] == "CONTINUE":
             return "act_step"
@@ -534,9 +481,7 @@ class FruitAgent:
             return "plan_step"
         return "finish_step"
 
-    # build_graph
-    # Connects all nodes and routes into one LangGraph workflow.
-    # Node names end with "_step" so they never match a state key.
+    # Build and compile the workflow graph.
     def build_graph(self):
         graph = StateGraph(AgentState)
 
@@ -557,9 +502,7 @@ class FruitAgent:
 
     # ---------------- Commands and chat ----------------
 
-    # handle_command
-    # Handles fixed commands without the model.
-    # Returns None when the message is not a command.
+    # Handle built-in commands without calling the model.
     def handle_command(self, command):
         if command == "reset":
             self.memory.clear()
@@ -588,11 +531,7 @@ class FruitAgent:
 
         return None
 
-    # chat
-    # The entry point for every user message.
-    # 1. Commands are handled directly.
-    # 2. Other messages go through the LangGraph workflow.
-    # 3. The pending order is replaced only by a successful new quote.
+    # Handle a command or run the workflow for a chat message.
     def chat(self, message):
         command = " ".join(message.split()).casefold()
 

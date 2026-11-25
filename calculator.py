@@ -3,22 +3,16 @@ from decimal import Decimal, ROUND_HALF_UP
 from inventory import decimal_value
 
 
-# Money is rounded to cents.
+# Round money to cents.
 MONEY_STEP = Decimal("0.01")
 
 
-# money_value
-# Rounds a number to two decimal places.
-# Example: 3.525 becomes 3.53.
+# Round a number to two decimal places.
 def money_value(value):
     return decimal_value(value).quantize(MONEY_STEP, rounding=ROUND_HALF_UP)
 
 
-# calculate_invoice
-# Builds an invoice from a basket.
-# For each fruit: line total = quantity x price, rounded to cents.
-# Then it adds all line totals together.
-# It rejects unknown fruits, duplicate fruits, and quantities that are not positive.
+# Build an invoice and reject invalid items.
 def calculate_invoice(items, products, currency):
     prices = {
         product["name"]: decimal_value(product["price_per_kg"])
